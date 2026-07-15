@@ -201,8 +201,14 @@ struct ContentView: View {
                 )
                 .navigationTitle("重复任务")
             } else if selection == .trash {
-                TrashView(store: store)
-                    .navigationTitle("已删除任务")
+                TrashView(
+                    store: store,
+                    selectedItemID: $selectedItemID,
+                    onSelectItem: {
+                        detailTimeFilter = .all
+                    }
+                )
+                .navigationTitle("已删除任务")
             } else {
                 let activeItems = filteredItems.filter { !$0.isCompleted }
                 let mainGroups = activeItems.filter { $0.category == .main }.groupedByDisplayDate()
@@ -224,7 +230,7 @@ struct ContentView: View {
                 .navigationTitle(listTitle)
             }
         } detail: {
-            if let selectedItemID, let target = store.detailTarget(for: selectedItemID, in: detailTimeFilter) {
+            if let selectedItemID, let target = store.detailTarget(for: selectedItemID, in: detailTimeFilter, includesDeleted: selection == .trash) {
                 switch target {
                 case .quest(let questID):
                     QuestDetailView(store: store, questID: questID)
@@ -615,6 +621,8 @@ struct RecurringTasksView: View {
 
 struct TrashView: View {
     @ObservedObject var store: QuestStore
+    @Binding var selectedItemID: String?
+    let onSelectItem: () -> Void
 
     private var deletedQuests: [Quest] {
         store.deletedQuests()
@@ -639,8 +647,16 @@ struct TrashView: View {
                     description: Text("删除的任务会出现在这里，可以随时恢复")
                 )
             } else {
-                List(deletedQuests) { quest in
-                    TrashRow(store: store, quest: quest)
+                List(selection: $selectedItemID) {
+                    ForEach(deletedQuests) { quest in
+                        TrashRow(store: store, quest: quest)
+                            .tag(quest.id.uuidString)
+                    }
+                }
+                .onChange(of: selectedItemID) { _, newValue in
+                    if newValue != nil {
+                        onSelectItem()
+                    }
                 }
             }
         }

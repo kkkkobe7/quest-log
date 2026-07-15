@@ -429,6 +429,8 @@ func runChecks() throws {
     require(trashStore.deletedQuests().map(\.title) == ["最新删除", "最早删除"], "回收站应按删除时间倒序展示")
     require(!trashStore.deletedQuests().contains { $0.id == trashUntouchedID }, "未删除任务不应出现在回收站中")
     require(trashStore.deletedQuests().first { $0.id == trashFirstID }?.category == .main, "回收站中任务应保留其原有分类便于展示")
+    require(trashStore.detailTarget(for: trashFirstID.uuidString, in: .all) == nil, "常规详情解析仍应隐藏已删除任务")
+    require(trashStore.detailTarget(for: trashFirstID.uuidString, in: .all, includesDeleted: true) == .quest(trashFirstID), "已删除任务视图应能解析已删除任务详情")
 
     trashStore.restoreQuest(id: trashFirstID)
     require(!trashStore.deletedQuests().contains { $0.id == trashFirstID }, "恢复后任务应从回收站中消失")

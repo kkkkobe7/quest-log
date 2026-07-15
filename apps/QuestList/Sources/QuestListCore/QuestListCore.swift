@@ -111,8 +111,8 @@ public final class QuestStore: ObservableObject {
         }
     }
 
-    public func detailTarget(for selectedItemID: String, in timeFilter: QuestTimeFilter, now: Date = .now, calendar: Calendar = .current) -> QuestDetailTarget? {
-        if let questID = UUID(uuidString: selectedItemID), let matchedQuest = quest(id: questID), matchedQuest.deletedAt == nil {
+    public func detailTarget(for selectedItemID: String, in timeFilter: QuestTimeFilter, now: Date = .now, calendar: Calendar = .current, includesDeleted: Bool = false) -> QuestDetailTarget? {
+        if let questID = UUID(uuidString: selectedItemID), let matchedQuest = quest(id: questID), includesDeleted || matchedQuest.deletedAt == nil {
             return .quest(questID)
         }
         guard let item = listItems(in: timeFilter, now: now, calendar: calendar).first(where: { $0.id == selectedItemID }) else { return nil }
