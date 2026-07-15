@@ -434,6 +434,7 @@ struct CompletedTasksView: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: completedTimeFilter) { _, newValue in
             if selectedItemID != nil {
                 onSelectItem(newValue)
