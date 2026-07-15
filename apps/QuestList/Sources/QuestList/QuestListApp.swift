@@ -140,6 +140,7 @@ extension RecurrenceIntervalUnit: Identifiable {
 
 enum SidebarSelection: Hashable {
     case allQuests
+    case completedTasks
     case recurringTasks
     case trash
     case timeline
@@ -152,12 +153,13 @@ struct ContentView: View {
     @State private var selectedItemID: String?
     @State private var newGoalName = ""
     @State private var selectedTimeFilter: QuestTimeFilter = .today
+    @State private var detailTimeFilter: QuestTimeFilter = .today
 
     private var baseQuests: [Quest] {
         switch selection {
         case .goal(let goalID):
             store.quests.filter { $0.goalID == goalID }
-        case .allQuests, .recurringTasks, .trash, .timeline, .none:
+        case .allQuests, .completedTasks, .recurringTasks, .trash, .timeline, .none:
             store.quests
         }
     }
@@ -179,11 +181,23 @@ struct ContentView: View {
             if selection == .timeline {
                 ActivityTimelineView(store: store)
                     .navigationTitle("动态时间线")
+            } else if selection == .completedTasks {
+                CompletedTasksView(
+                    store: store,
+                    selectedItemID: $selectedItemID,
+                    onSelectItem: { filter in
+                        detailTimeFilter = filter
+                    }
+                )
+                .navigationTitle("已完成任务")
             } else if selection == .recurringTasks {
                 RecurringTasksView(
                     store: store,
                     selectedTimeFilter: $selectedTimeFilter,
-                    selectedItemID: $selectedItemID
+                    selectedItemID: $selectedItemID,
+                    onSelectItem: {
+                        detailTimeFilter = selectedTimeFilter
+                    }
                 )
                 .navigationTitle("重复任务")
             } else if selection == .trash {
@@ -194,22 +208,23 @@ struct ContentView: View {
                 let mainGroups = activeItems.filter { $0.category == .main }.groupedByDisplayDate()
                 let sideGroups = activeItems.filter { $0.category == .side }.groupedByDisplayDate()
                 let dailyGroups = activeItems.filter { $0.category == .daily }.groupedByDisplayDate()
-                let completedGroups = filteredItems.filter { $0.isCompleted }.groupedByDisplayDate()
 
                 QuestListView(
                     store: store,
                     mainGroups: mainGroups,
                     sideGroups: sideGroups,
                     dailyGroups: dailyGroups,
-                    completedGroups: completedGroups,
                     selectedTimeFilter: $selectedTimeFilter,
                     selectedItemID: $selectedItemID,
-                    onAddQuest: addQuest
+                    onAddQuest: addQuest,
+                    onSelectItem: {
+                        detailTimeFilter = selectedTimeFilter
+                    }
                 )
                 .navigationTitle(listTitle)
             }
         } detail: {
-            if let selectedItemID, let target = store.detailTarget(for: selectedItemID, in: selectedTimeFilter) {
+            if let selectedItemID, let target = store.detailTarget(for: selectedItemID, in: detailTimeFilter) {
                 switch target {
                 case .quest(let questID):
                     QuestDetailView(store: store, questID: questID)
@@ -236,6 +251,8 @@ struct ContentView: View {
             Section("视图") {
                 Label("全部任务", systemImage: "list.bullet.rectangle")
                     .tag(SidebarSelection.allQuests)
+                Label("已完成任务", systemImage: "checkmark.seal")
+                    .tag(SidebarSelection.completedTasks)
                 Label("重复任务", systemImage: "repeat")
                     .tag(SidebarSelection.recurringTasks)
                 Label("已删除任务", systemImage: "trash")
@@ -270,6 +287,8 @@ struct ContentView: View {
         switch selection {
         case .goal(let goalID):
             store.goal(id: goalID)?.name ?? "目标"
+        case .completedTasks:
+            "已完成任务"
         case .recurringTasks:
             "重复任务"
         case .trash:
@@ -330,13 +349,13 @@ struct QuestListView: View {
     let mainGroups: [QuestItemDateGroup]
     let sideGroups: [QuestItemDateGroup]
     let dailyGroups: [QuestItemDateGroup]
-    let completedGroups: [QuestItemDateGroup]
     @Binding var selectedTimeFilter: QuestTimeFilter
     @Binding var selectedItemID: String?
     let onAddQuest: () -> Void
+    let onSelectItem: () -> Void
 
     private var isEmpty: Bool {
-        mainGroups.isEmpty && sideGroups.isEmpty && dailyGroups.isEmpty && completedGroups.isEmpty
+        mainGroups.isEmpty && sideGroups.isEmpty && dailyGroups.isEmpty
     }
 
     var body: some View {
@@ -366,8 +385,58 @@ struct QuestListView: View {
                     QuestSection(title: "主线任务", dateGroups: mainGroups, store: store)
                     QuestSection(title: "支线任务", dateGroups: sideGroups, store: store)
                     QuestSection(title: "每日任务", dateGroups: dailyGroups, store: store)
-                    QuestSection(title: "已完成任务", dateGroups: completedGroups, store: store, isExpandedByDefault: false)
                 }
+                .onChange(of: selectedItemID) { _, newValue in
+                    if newValue != nil {
+                        onSelectItem()
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct CompletedTasksView: View {
+    @ObservedObject var store: QuestStore
+    @Binding var selectedItemID: String?
+    let onSelectItem: (QuestTimeFilter) -> Void
+    @State private var completedTimeFilter: QuestTimeFilter = .today
+
+    private var completedGroups: [QuestItemDateGroup] {
+        store.listItems(in: completedTimeFilter)
+            .filter { $0.isCompleted }
+            .groupedByDisplayDate()
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("已完成任务")
+                    .font(.headline)
+                TimeFilterPicker(selectedTimeFilter: $completedTimeFilter)
+            }
+            .padding()
+
+            if completedGroups.isEmpty {
+                ContentUnavailableView(
+                    "暂无已完成任务",
+                    systemImage: "checkmark.seal",
+                    description: Text("当前时间范围内暂无已完成任务")
+                )
+            } else {
+                List(selection: $selectedItemID) {
+                    QuestSection(title: "已完成任务", dateGroups: completedGroups, store: store)
+                }
+                .onChange(of: selectedItemID) { _, newValue in
+                    if newValue != nil {
+                        onSelectItem(completedTimeFilter)
+                    }
+                }
+            }
+        }
+        .onChange(of: completedTimeFilter) { _, newValue in
+            if selectedItemID != nil {
+                onSelectItem(newValue)
             }
         }
     }
@@ -489,6 +558,7 @@ struct RecurringTasksView: View {
     @ObservedObject var store: QuestStore
     @Binding var selectedTimeFilter: QuestTimeFilter
     @Binding var selectedItemID: String?
+    let onSelectItem: () -> Void
 
     private var recurringParents: [Quest] {
         store.quests.filter { $0.recurrenceRule != nil }.sorted { $0.title < $1.title }
@@ -526,6 +596,11 @@ struct RecurringTasksView: View {
                                 }
                             }
                         }
+                    }
+                }
+                .onChange(of: selectedItemID) { _, newValue in
+                    if newValue != nil {
+                        onSelectItem()
                     }
                 }
             }
