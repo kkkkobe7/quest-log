@@ -555,14 +555,28 @@ struct QuestRow: View {
     }
 }
 
+struct RecurringParentItem: Identifiable {
+    let parent: Quest
+    let item: QuestListItem
+
+    var id: UUID { parent.id }
+}
+
 struct RecurringTasksView: View {
     @ObservedObject var store: QuestStore
     @Binding var selectedTimeFilter: QuestTimeFilter
     @Binding var selectedItemID: String?
     let onSelectItem: () -> Void
 
-    private var recurringParents: [Quest] {
-        store.quests.filter { $0.recurrenceRule != nil }.sorted { $0.title < $1.title }
+    private var visibleRecurringItems: [RecurringParentItem] {
+        let items = store.listItems(in: selectedTimeFilter)
+        return store.quests
+            .filter { $0.deletedAt == nil && $0.recurrenceRule != nil }
+            .sorted { $0.displayTitle < $1.displayTitle }
+            .compactMap { parent in
+                guard let item = items.first(where: { $0.questID == parent.id && $0.isOccurrence }) else { return nil }
+                return RecurringParentItem(parent: parent, item: item)
+            }
     }
 
     var body: some View {
@@ -574,28 +588,18 @@ struct RecurringTasksView: View {
             }
             .padding()
 
-            if recurringParents.isEmpty {
+            if visibleRecurringItems.isEmpty {
                 ContentUnavailableView(
                     "暂无重复任务",
                     systemImage: "repeat",
-                    description: Text("在任务详情中开启重复任务后，会在这里按父任务分组展示")
+                    description: Text("当前时间范围内暂无重复任务 occurrence")
                 )
             } else {
                 List(selection: $selectedItemID) {
-                    ForEach(recurringParents) { parent in
-                        let items = store.listItems(in: selectedTimeFilter)
-                            .filter { $0.questID == parent.id && $0.isOccurrence }
-                        Section(parent.displayTitle) {
-                            if items.isEmpty {
-                                Text("当前时间范围内暂无 occurrence")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                ForEach(items) { item in
-                                    QuestRow(store: store, item: item)
-                                        .tag(item.id)
-                                }
-                            }
+                    ForEach(visibleRecurringItems) { visibleItem in
+                        Section(visibleItem.parent.displayTitle) {
+                            QuestRow(store: store, item: visibleItem.item)
+                                .tag(visibleItem.item.id)
                         }
                     }
                 }
