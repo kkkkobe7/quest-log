@@ -46,15 +46,12 @@ public final class QuestStore: ObservableObject {
         save()
     }
 
-    public func completeQuest(id: UUID) {
+    public func completeQuest(id: UUID, now: Date = .now) {
         updateQuest(id: id) { quest in
-            guard !quest.xpAwarded else {
-                quest.isCompleted = true
-                return
-            }
             quest.isCompleted = true
+            quest.completedAt = now
+            guard !quest.xpAwarded else { return }
             quest.xpAwarded = true
-            quest.completedAt = .now
             profile.totalXP += quest.xpReward
         }
         save()

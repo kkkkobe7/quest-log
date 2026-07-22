@@ -174,6 +174,17 @@ func runChecks() throws {
     }
     require(rolloverStore.listItems(in: .today, now: anchor, calendar: calendar).contains { $0.questID == completedNoDueQuestID }, "取消完成后无截止任务应重新滚到今日视图")
 
+    let xpBeforeRolloverRecompletion = rolloverStore.profile.totalXP
+    rolloverStore.updateQuest(id: rolloverQuestID) { quest in
+        quest.isCompleted = false
+        quest.xpAwarded = true
+        quest.completedAt = yesterdayCompletion
+    }
+    let recompletionTime = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2024, month: 1, day: 10, hour: 17).date!
+    rolloverStore.completeQuest(id: rolloverQuestID, now: recompletionTime)
+    require(datesAreApproximatelyEqual(rolloverStore.quest(id: rolloverQuestID)?.completedAt, recompletionTime), "重新完成任务时应更新 completedAt")
+    require(rolloverStore.profile.totalXP == xpBeforeRolloverRecompletion, "重新完成已发放 XP 的任务时不应重复发放 XP")
+
     let dailyParent = Quest(title: "每日任务", startDate: jan10, recurrenceRule: .daily)
     let dailyOccurrences = dailyParent.generateOccurrences(in: .nextThreeDays, now: anchor, calendar: calendar)
     require(occurrenceDays(dailyOccurrences, calendar: calendar) == [10, 11, 12], "每日规则近三天应生成三条 occurrence")
