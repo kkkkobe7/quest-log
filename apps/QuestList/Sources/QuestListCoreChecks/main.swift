@@ -104,6 +104,76 @@ func runChecks() throws {
     let futureVisibleTitles = quests.visible(in: .future, now: anchor, calendar: calendar).map(\.title)
     require(futureVisibleTitles == ["按截止时间显示", "三天内支线", "三天外任务"], "未来应排除今天任务，包含明天及之后的任务")
 
+    // --- 无截止时间任务：未完成延续，完成停止 ---
+    let rolloverStorageURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        .appendingPathComponent("questlist.json")
+    let rolloverStore = QuestStore(storageURL: rolloverStorageURL)
+    let yesterdayStart = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2024, month: 1, day: 9, hour: 15, minute: 30).date!
+    let yesterdayCompletion = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2024, month: 1, day: 9, hour: 16).date!
+    let legacyStart = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2024, month: 1, day: 8, hour: 10).date!
+    let futureNoDueStart = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2024, month: 1, day: 11, hour: 9).date!
+    let overdueDueDate = DateComponents(calendar: calendar, timeZone: calendar.timeZone, year: 2024, month: 1, day: 9, hour: 18).date!
+
+    let rolloverQuestID = rolloverStore.addQuest(goalID: nil)
+    rolloverStore.updateQuest(id: rolloverQuestID) { quest in
+        quest.title = "昨天延续"
+        quest.startDate = yesterdayStart
+    }
+    let futureNoDueQuestID = rolloverStore.addQuest(goalID: nil)
+    rolloverStore.updateQuest(id: futureNoDueQuestID) { quest in
+        quest.title = "明天开始"
+        quest.startDate = futureNoDueStart
+    }
+    let overdueDueQuestID = rolloverStore.addQuest(goalID: nil)
+    rolloverStore.updateQuest(id: overdueDueQuestID) { quest in
+        quest.title = "过期截止"
+        quest.startDate = jan10
+        quest.dueDate = overdueDueDate
+    }
+    let completedNoDueQuestID = rolloverStore.addQuest(goalID: nil)
+    rolloverStore.updateQuest(id: completedNoDueQuestID) { quest in
+        quest.title = "昨天完成"
+        quest.startDate = legacyStart
+        quest.isCompleted = true
+        quest.completedAt = yesterdayCompletion
+    }
+    let legacyCompletedQuestID = rolloverStore.addQuest(goalID: nil)
+    rolloverStore.updateQuest(id: legacyCompletedQuestID) { quest in
+        quest.title = "旧完成"
+        quest.startDate = legacyStart
+        quest.isCompleted = true
+        quest.completedAt = nil
+    }
+
+    let rolloverTodayItems = rolloverStore.listItems(in: .today, now: anchor, calendar: calendar)
+    require(rolloverTodayItems.contains { $0.questID == rolloverQuestID }, "昨天开始且未完成的无截止任务应滚到今日视图")
+    require(!rolloverTodayItems.contains { $0.questID == futureNoDueQuestID }, "未来开始的无截止任务不应提前进入今日视图")
+    require(!rolloverTodayItems.contains { $0.questID == overdueDueQuestID }, "有截止时间的过期任务不应滚到今日视图")
+    require(!rolloverTodayItems.contains { $0.questID == completedNoDueQuestID }, "已完成的无截止任务不应继续滚到今日视图")
+    require(!rolloverTodayItems.contains { $0.questID == legacyCompletedQuestID }, "缺少 completedAt 的旧已完成任务不应滚到今日视图")
+
+    let rolledItem = rolloverTodayItems.first { $0.questID == rolloverQuestID }
+    require(calendar.component(.day, from: rolledItem?.displayDate ?? .distantPast) == 10, "滚动后的日期部分应为今天")
+    require(calendar.component(.hour, from: rolledItem?.displayDate ?? .distantPast) == 15, "滚动后应保留原开始时间的小时")
+    require(calendar.component(.minute, from: rolledItem?.displayDate ?? .distantPast) == 30, "滚动后应保留原开始时间的分钟")
+
+    let rolloverAllItems = rolloverStore.listItems(in: .all, now: anchor, calendar: calendar)
+    let completedItem = rolloverAllItems.first { $0.questID == completedNoDueQuestID }
+    let legacyCompletedItem = rolloverAllItems.first { $0.questID == legacyCompletedQuestID }
+    let dueItem = rolloverAllItems.first { $0.questID == overdueDueQuestID }
+    require(calendar.component(.day, from: completedItem?.displayDate ?? .distantPast) == 9, "已完成无截止任务应按 completedAt 分组")
+    require(calendar.component(.hour, from: completedItem?.displayDate ?? .distantPast) == 16, "已完成无截止任务应保留 completedAt 时间")
+    require(calendar.component(.day, from: legacyCompletedItem?.displayDate ?? .distantPast) == 8, "缺少 completedAt 的旧已完成任务应回退到 startDate")
+    require(calendar.component(.day, from: dueItem?.displayDate ?? .distantPast) == 9, "有截止时间的任务仍应按 dueDate 分组")
+    require(rolloverStore.listItems(in: .future, now: anchor, calendar: calendar).contains { $0.questID == futureNoDueQuestID }, "未来开始的无截止任务应出现在未来筛选")
+    require(!rolloverStore.listItems(in: .future, now: anchor, calendar: calendar).contains { $0.questID == rolloverQuestID }, "滚到今天的无截止任务不应出现在未来筛选")
+
+    rolloverStore.updateQuest(id: completedNoDueQuestID) { quest in
+        quest.isCompleted = false
+    }
+    require(rolloverStore.listItems(in: .today, now: anchor, calendar: calendar).contains { $0.questID == completedNoDueQuestID }, "取消完成后无截止任务应重新滚到今日视图")
+
     let dailyParent = Quest(title: "每日任务", startDate: jan10, recurrenceRule: .daily)
     let dailyOccurrences = dailyParent.generateOccurrences(in: .nextThreeDays, now: anchor, calendar: calendar)
     require(occurrenceDays(dailyOccurrences, calendar: calendar) == [10, 11, 12], "每日规则近三天应生成三条 occurrence")
