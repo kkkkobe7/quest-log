@@ -100,8 +100,9 @@ public final class QuestStore: ObservableObject {
                     item(for: occurrence, parent: quest)
                 }
             }
-            guard timeFilter.contains(quest.displayDate, now: now, calendar: calendar) else { return [] }
-            return [QuestListItem(quest: quest)]
+            let displayDate = quest.effectiveDisplayDate(now: now, calendar: calendar)
+            guard timeFilter.contains(displayDate, now: now, calendar: calendar) else { return [] }
+            return [QuestListItem(quest: quest, now: now, calendar: calendar)]
         }
         .sorted { lhs, rhs in
             if lhs.displayDate != rhs.displayDate {
@@ -413,6 +414,27 @@ public struct Quest: Identifiable, Codable, Hashable {
         dueDate ?? startDate
     }
 
+    public func effectiveDisplayDate(now: Date = .now, calendar: Calendar = .current) -> Date {
+        if let dueDate {
+            return dueDate
+        }
+        if isCompleted {
+            return completedAt ?? startDate
+        }
+
+        let startDay = calendar.startOfDay(for: startDate)
+        let today = calendar.startOfDay(for: now)
+        guard startDay <= today else { return startDate }
+
+        let time = calendar.dateComponents([.hour, .minute, .second], from: startDate)
+        return calendar.date(
+            bySettingHour: time.hour ?? 0,
+            minute: time.minute ?? 0,
+            second: time.second ?? 0,
+            of: today
+        ) ?? now
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id
         case title
@@ -619,8 +641,9 @@ public struct QuestListItem: Identifiable, Hashable {
     public var xpAwarded: Bool
     public var goalID: UUID?
     public var xpReward: Int
+    public var displayDate: Date
 
-    public init(quest: Quest) {
+    public init(quest: Quest, now: Date = .now, calendar: Calendar = .current) {
         self.id = quest.id.uuidString
         self.questID = quest.id
         self.occurrenceDate = nil
@@ -634,6 +657,7 @@ public struct QuestListItem: Identifiable, Hashable {
         self.xpAwarded = quest.xpAwarded
         self.goalID = quest.goalID
         self.xpReward = quest.baseXPReward
+        self.displayDate = quest.effectiveDisplayDate(now: now, calendar: calendar)
     }
 
     public init(parent: Quest, occurrence: QuestOccurrence, state: QuestOccurrenceState?, override: QuestOccurrenceOverride?) {
@@ -650,10 +674,10 @@ public struct QuestListItem: Identifiable, Hashable {
         self.xpAwarded = state?.xpAwarded ?? false
         self.goalID = parent.goalID
         self.xpReward = override?.xpReward ?? parent.baseXPReward
+        self.displayDate = override?.dueDate ?? occurrence.date
     }
 
     public var isOccurrence: Bool { occurrenceDate != nil }
-    public var displayDate: Date { dueDate ?? occurrenceDate ?? .now }
 }
 
 public extension Quest {
@@ -847,22 +871,24 @@ public struct QuestDateGroup: Identifiable, Hashable {
 public extension Array where Element == Quest {
     func visible(in timeFilter: QuestTimeFilter, now: Date = .now, calendar: Calendar = .current) -> [Quest] {
         filter { quest in
-            timeFilter.contains(quest.displayDate, now: now, calendar: calendar)
+            timeFilter.contains(quest.effectiveDisplayDate(now: now, calendar: calendar), now: now, calendar: calendar)
         }
     }
 
     func groupedByDisplayDate(timeFilter: QuestTimeFilter, now: Date = .now, calendar: Calendar = .current) -> [QuestDateGroup] {
         let visibleQuests = visible(in: timeFilter, now: now, calendar: calendar)
         let grouped = Dictionary(grouping: visibleQuests) { quest in
-            calendar.startOfDay(for: quest.displayDate)
+            calendar.startOfDay(for: quest.effectiveDisplayDate(now: now, calendar: calendar))
         }
 
         return grouped.keys.sorted().map { date in
             QuestDateGroup(
                 date: date,
                 quests: (grouped[date] ?? []).sorted { lhs, rhs in
-                    if lhs.displayDate != rhs.displayDate {
-                        return lhs.displayDate < rhs.displayDate
+                    let lhsDisplayDate = lhs.effectiveDisplayDate(now: now, calendar: calendar)
+                    let rhsDisplayDate = rhs.effectiveDisplayDate(now: now, calendar: calendar)
+                    if lhsDisplayDate != rhsDisplayDate {
+                        return lhsDisplayDate < rhsDisplayDate
                     }
                     return lhs.createdAt < rhs.createdAt
                 }
